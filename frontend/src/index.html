@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI Traffic Management System</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Siren overlay -->
+  <div class="siren-overlay" id="sirenOverlay"></div>
+
+  <!-- ── TOP BAR ──────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="logo">🚦</span>
+      <div>
+        <div class="app-title">AI Traffic Management System</div>
+        <div class="app-sub">Smart Intersection · Real-Time AI · Playlist Mode</div>
+      </div>
+    </div>
+    <div class="topbar-center">
+      <div class="status-badge" id="statusBadge">
+        <span class="pulse-dot"></span>
+        <span id="statusText">LIVE · AI ACTIVE</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <button class="topbar-btn" id="playlistBtn" onclick="togglePlaylistPanel()">📋 Manage Playlists</button>
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="win-btns">
+        <button onclick="window.electronAPI?.minimize()">─</button>
+        <button onclick="window.electronAPI?.maximize()">□</button>
+        <button class="x-btn" onclick="window.electronAPI?.close()">✕</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── PLAYLIST MANAGER PANEL (slide-in) ────────────────────────── -->
+  <div class="playlist-panel" id="playlistPanel">
+    <div class="pp-header">
+      <span>📋 Playlist Manager</span>
+      <button class="pp-close" onclick="togglePlaylistPanel()">✕</button>
+    </div>
+    <div class="pp-tabs">
+      <button class="pp-tab active" onclick="selectLaneTab('north')" id="tab-north">⬆ NORTH</button>
+      <button class="pp-tab" onclick="selectLaneTab('south')" id="tab-south">⬇ SOUTH</button>
+      <button class="pp-tab" onclick="selectLaneTab('east')"  id="tab-east">➡ EAST</button>
+      <button class="pp-tab" onclick="selectLaneTab('west')"  id="tab-west">⬅ WEST</button>
+    </div>
+    <div class="pp-body">
+      <!-- Clip list -->
+      <div class="pp-clips" id="ppClips"></div>
+
+      <!-- Add clip form -->
+      <div class="pp-add">
+        <div class="pp-add-title">➕ Add Clip</div>
+        <div class="pp-form-row">
+          <label>Label</label>
+          <input type="text" id="addLabel" placeholder="e.g. Normal Traffic 1" />
+        </div>
+        <div class="pp-form-row">
+          <label>Tag</label>
+          <select id="addTag">
+            <option value="normal">🟢 Normal</option>
+            <option value="high_congestion">🟡 High Congestion</option>
+            <option value="emergency">🔴 Emergency Vehicle</option>
+          </select>
+        </div>
+        <div class="pp-form-row">
+          <label>Video File</label>
+          <div class="pp-file-row">
+            <input type="text" id="addPath" placeholder="Path or upload below" readonly />
+            <button class="pp-browse" onclick="document.getElementById('ppFileInput').click()">Browse</button>
+            <input type="file" id="ppFileInput" accept="video/*" style="display:none" onchange="handlePPFile(event)" />
+          </div>
+        </div>
+        <button class="pp-add-btn" onclick="addClip()">Add to Playlist</button>
+        <div class="pp-upload-progress" id="ppProgress" style="display:none">
+          <div class="pp-prog-bar"><div class="pp-prog-fill" id="ppProgFill"></div></div>
+          <span id="ppProgLabel">Uploading…</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MAIN GRID ─────────────────────────────────────────────────── -->
+  <main class="main-grid" id="mainGrid">
+
+    <!-- LEFT: 4 Camera Feeds -->
+    <section class="panel cam-panel">
+      <div class="panel-hdr">
+        <span>📷 Live Camera Feeds</span>
+        <span class="hdr-badge" id="activeBadge">4 ACTIVE</span>
+      </div>
+      <div class="cam-grid">
+
+        <div class="cam-feed" id="cam-north"
+             ondragover="camDragOver(event,'north')"
+             ondragleave="camDragLeave(event,'north')"
+             ondrop="camDrop(event,'north')">
+          <canvas id="canvas-north"></canvas>
+          <div class="cam-top">
+            <span class="cam-dir">⬆ NORTH</span>
+            <span class="cam-live">● LIVE</span>
+          </div>
+          <div class="cam-bottom">
+            <div class="cam-info-row">
+              <span class="cam-count" id="count-north">— vehicles</span>
+              <span class="cam-dens" id="density-north">—</span>
+            </div>
+            <div class="cam-clip-row">
+              <span class="clip-label" id="cliplabel-north">—</span>
+              <span class="clip-tag"   id="cliptag-north">—</span>
+            </div>
+            <div class="cam-prog-wrap">
+              <div class="cam-prog-bar" id="camprog-north"></div>
+            </div>
+          </div>
+          <div class="cam-traffic-bar" id="trafficbar-north"></div>
+          <div class="emg-badge"        id="emg-north">🚨 EMERGENCY VEHICLE</div>
+          <div class="congestion-badge" id="cong-north">🚗 HIGH CONGESTION</div>
+          <div class="drop-hint"        id="drophint-north">⬇ Drop video here</div>
+          <div class="drop-tag-picker"  id="tagpicker-north">
+            <div class="dtp-title">Tag this clip:</div>
+            <button onclick="confirmDrop('north','normal')">🟢 Normal</button>
+            <button onclick="confirmDrop('north','high_congestion')">🟡 High Congestion</button>
+            <button onclick="confirmDrop('north','emergency')">🔴 Emergency</button>
+            <button class="dtp-cancel" onclick="cancelDrop('north')">Cancel</button>
+          </div>
+          <div class="drop-uploading" id="dropuploading-north">
+            <div class="dup-spinner"></div>
+            <span id="duplabel-north">Uploading…</span>
+          </div>
+          <div class="cam-playlist-btn" onclick="openPlaylistForLane('north')">📋 <span id="plcount-north">0</span></div>
+        </div>
+
+        <div class="cam-feed" id="cam-south"
+             ondragover="camDragOver(event,'south')"
+             ondragleave="camDragLeave(event,'south')"
+             ondrop="camDrop(event,'south')">
+          <canvas id="canvas-south"></canvas>
+          <div class="cam-top">
+            <span class="cam-dir">⬇ SOUTH</span>
+            <span class="cam-live">● LIVE</span>
+          </div>
+          <div class="cam-bottom">
+            <div class="cam-info-row">
+              <span class="cam-count" id="count-south">— vehicles</span>
+              <span class="cam-dens" id="density-south">—</span>
+            </div>
+            <div class="cam-clip-row">
+              <span class="clip-label" id="cliplabel-south">—</span>
+              <span class="clip-tag"   id="cliptag-south">—</span>
+            </div>
+            <div class="cam-prog-wrap">
+              <div class="cam-prog-bar" id="camprog-south"></div>
+            </div>
+          </div>
+          <div class="cam-traffic-bar" id="trafficbar-south"></div>
+          <div class="emg-badge"        id="emg-south">🚨 EMERGENCY VEHICLE</div>
+          <div class="congestion-badge" id="cong-south">🚗 HIGH CONGESTION</div>
+          <div class="drop-hint"        id="drophint-south">⬇ Drop video here</div>
+          <div class="drop-tag-picker"  id="tagpicker-south">
+            <div class="dtp-title">Tag this clip:</div>
+            <button onclick="confirmDrop('south','normal')">🟢 Normal</button>
+            <button onclick="confirmDrop('south','high_congestion')">🟡 High Congestion</button>
+            <button onclick="confirmDrop('south','emergency')">🔴 Emergency</button>
+            <button class="dtp-cancel" onclick="cancelDrop('south')">Cancel</button>
+          </div>
+          <div class="drop-uploading" id="dropuploading-south">
+            <div class="dup-spinner"></div>
+            <span id="duplabel-south">Uploading…</span>
+          </div>
+          <div class="cam-playlist-btn" onclick="openPlaylistForLane('south')">📋 <span id="plcount-south">0</span></div>
+        </div>
+
+        <div class="cam-feed" id="cam-east"
+             ondragover="camDragOver(event,'east')"
+             ondragleave="camDragLeave(event,'east')"
+             ondrop="camDrop(event,'east')">
+          <canvas id="canvas-east"></canvas>
+          <div class="cam-top">
+            <span class="cam-dir">➡ EAST</span>
+            <span class="cam-live">● LIVE</span>
+          </div>
+          <div class="cam-bottom">
+            <div class="cam-info-row">
+              <span class="cam-count" id="count-east">— vehicles</span>
+              <span class="cam-dens" id="density-east">—</span>
+            </div>
+            <div class="cam-clip-row">
+              <span class="clip-label" id="cliplabel-east">—</span>
+              <span class="clip-tag"   id="cliptag-east">—</span>
+            </div>
+            <div class="cam-prog-wrap">
+              <div class="cam-prog-bar" id="camprog-east"></div>
+            </div>
+          </div>
+          <div class="cam-traffic-bar" id="trafficbar-east"></div>
+          <div class="emg-badge"        id="emg-east">🚨 EMERGENCY VEHICLE</div>
+          <div class="congestion-badge" id="cong-east">🚗 HIGH CONGESTION</div>
+          <div class="drop-hint"        id="drophint-east">⬇ Drop video here</div>
+          <div class="drop-tag-picker"  id="tagpicker-east">
+            <div class="dtp-title">Tag this clip:</div>
+            <button onclick="confirmDrop('east','normal')">🟢 Normal</button>
+            <button onclick="confirmDrop('east','high_congestion')">🟡 High Congestion</button>
+            <button onclick="confirmDrop('east','emergency')">🔴 Emergency</button>
+            <button class="dtp-cancel" onclick="cancelDrop('east')">Cancel</button>
+          </div>
+          <div class="drop-uploading" id="dropuploading-east">
+            <div class="dup-spinner"></div>
+            <span id="duplabel-east">Uploading…</span>
+          </div>
+          <div class="cam-playlist-btn" onclick="openPlaylistForLane('east')">📋 <span id="plcount-east">0</span></div>
+        </div>
+
+        <div class="cam-feed" id="cam-west"
+             ondragover="camDragOver(event,'west')"
+             ondragleave="camDragLeave(event,'west')"
+             ondrop="camDrop(event,'west')">
+          <canvas id="canvas-west"></canvas>
+          <div class="cam-top">
+            <span class="cam-dir">⬅ WEST</span>
+            <span class="cam-live">● LIVE</span>
+          </div>
+          <div class="cam-bottom">
+            <div class="cam-info-row">
+              <span class="cam-count" id="count-west">— vehicles</span>
+              <span class="cam-dens" id="density-west">—</span>
+            </div>
+            <div class="cam-clip-row">
+              <span class="clip-label" id="cliplabel-west">—</span>
+              <span class="clip-tag"   id="cliptag-west">—</span>
+            </div>
+            <div class="cam-prog-wrap">
+              <div class="cam-prog-bar" id="camprog-west"></div>
+            </div>
+          </div>
+          <div class="cam-traffic-bar" id="trafficbar-west"></div>
+          <div class="emg-badge"        id="emg-west">🚨 EMERGENCY VEHICLE</div>
+          <div class="congestion-badge" id="cong-west">🚗 HIGH CONGESTION</div>
+          <div class="drop-hint"        id="drophint-west">⬇ Drop video here</div>
+          <div class="drop-tag-picker"  id="tagpicker-west">
+            <div class="dtp-title">Tag this clip:</div>
+            <button onclick="confirmDrop('west','normal')">🟢 Normal</button>
+            <button onclick="confirmDrop('west','high_congestion')">🟡 High Congestion</button>
+            <button onclick="confirmDrop('west','emergency')">🔴 Emergency</button>
+            <button class="dtp-cancel" onclick="cancelDrop('west')">Cancel</button>
+          </div>
+          <div class="drop-uploading" id="dropuploading-west">
+            <div class="dup-spinner"></div>
+            <span id="duplabel-west">Uploading…</span>
+          </div>
+          <div class="cam-playlist-btn" onclick="openPlaylistForLane('west')">📋 <span id="plcount-west">0</span></div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- CENTER: Intersection -->
+    <section class="panel int-panel">
+      <div class="panel-hdr">
+        <span>🗺️ Live Intersection</span>
+        <div class="mode-btns">
+          <button class="mode-btn active" id="btn-auto"   onclick="setMode('auto')">AUTO</button>
+          <button class="mode-btn"        id="btn-manual" onclick="setMode('manual')">MANUAL</button>
+          <button class="mode-btn emg"    id="btn-emg"    onclick="triggerEmergency()">⚠ EMERGENCY</button>
+        </div>
+      </div>
+
+      <div class="int-wrapper">
+        <div class="road-box">
+
+          <div class="road road-v">
+            <div class="dash dash-vl"></div><div class="dash dash-vr"></div>
+            <div class="cline cline-v"></div>
+          </div>
+          <div class="road road-h">
+            <div class="dash dash-ht"></div><div class="dash dash-hb"></div>
+            <div class="cline cline-h"></div>
+          </div>
+          <div class="crossing"><div class="zebra"></div></div>
+
+          <!-- Density fills on roads -->
+          <div class="rdensity rd-north" id="rd-north"></div>
+          <div class="rdensity rd-south" id="rd-south"></div>
+          <div class="rdensity rd-east"  id="rd-east"></div>
+          <div class="rdensity rd-west"  id="rd-west"></div>
+
+          <!-- Vehicle counts on road -->
+          <div class="rcount rc-north" id="rc-north">0 🚗</div>
+          <div class="rcount rc-south" id="rc-south">0 🚗</div>
+          <div class="rcount rc-east"  id="rc-east">0 🚗</div>
+          <div class="rcount rc-west"  id="rc-west">0 🚗</div>
+
+          <!-- Clip tag labels on road -->
+          <div class="rtag rt-north" id="rt-north"></div>
+          <div class="rtag rt-south" id="rt-south"></div>
+          <div class="rtag rt-east"  id="rt-east"></div>
+          <div class="rtag rt-west"  id="rt-west"></div>
+
+          <!-- Traffic signals -->
+          <div class="sig sig-north" id="sig-north">
+            <div class="sigbox">
+              <div class="sigl red"    id="north-red"></div>
+              <div class="sigl yellow" id="north-yellow"></div>
+              <div class="sigl green"  id="north-green"></div>
+            </div>
+            <div class="sigpole"></div><div class="siglabel">N</div>
+          </div>
+          <div class="sig sig-south" id="sig-south">
+            <div class="sigbox">
+              <div class="sigl red"    id="south-red"></div>
+              <div class="sigl yellow" id="south-yellow"></div>
+              <div class="sigl green"  id="south-green"></div>
+            </div>
+            <div class="sigpole"></div><div class="siglabel">S</div>
+          </div>
+          <div class="sig sig-east" id="sig-east">
+            <div class="sigbox sigbox-h">
+              <div class="sigl red"    id="east-red"></div>
+              <div class="sigl yellow" id="east-yellow"></div>
+              <div class="sigl green"  id="east-green"></div>
+            </div>
+            <div class="sigpole sigpole-h"></div><div class="siglabel">E</div>
+          </div>
+          <div class="sig sig-west" id="sig-west">
+            <div class="sigbox sigbox-h">
+              <div class="sigl red"    id="west-red"></div>
+              <div class="sigl yellow" id="west-yellow"></div>
+              <div class="sigl green"  id="west-green"></div>
+            </div>
+            <div class="sigpole sigpole-h"></div><div class="siglabel">W</div>
+          </div>
+
+          <!-- Glows -->
+          <div class="rglow glow-n" id="glow-north"></div>
+          <div class="rglow glow-s" id="glow-south"></div>
+          <div class="rglow glow-e" id="glow-east"></div>
+          <div class="rglow glow-w" id="glow-west"></div>
+
+          <!-- Cars -->
+          <div class="car car-n" id="car-north">🚗</div>
+          <div class="car car-s" id="car-south">🚗</div>
+          <div class="car car-e" id="car-east">🚗</div>
+          <div class="car car-w" id="car-west">🚗</div>
+          <div class="car car-w car-amb" id="car-amb" style="display:none">🚑</div>
+
+          <!-- Direction labels -->
+          <div class="dlabel dl-n">NORTH ↑</div>
+          <div class="dlabel dl-s">↓ SOUTH</div>
+          <div class="dlabel dl-e">EAST →</div>
+          <div class="dlabel dl-w">← WEST</div>
+        </div>
+      </div>
+
+      <!-- Manual controls -->
+      <div class="manual-row" id="manualRow">
+        <span class="manual-lbl">Override:</span>
+        <button class="mbtn" onclick="manualSet('north','green')">N 🟢</button>
+        <button class="mbtn" onclick="manualSet('south','green')">S 🟢</button>
+        <button class="mbtn" onclick="manualSet('east','green')">E 🟢</button>
+        <button class="mbtn" onclick="manualSet('west','green')">W 🟢</button>
+        <button class="mbtn red" onclick="allRed()">ALL RED</button>
+      </div>
+    </section>
+
+    <!-- RIGHT: Signal cards + AI + Logs -->
+    <section class="panel right-panel">
+      <div class="panel-hdr"><span>🚦 Signal Status</span></div>
+
+      <div class="sig-cards">
+        <div class="sig-card" id="card-north">
+          <div class="sc-left">
+            <div class="sc-dir">⬆ NORTH</div>
+            <div class="sc-state" id="state-north">—</div>
+            <div class="sc-veh"   id="veh-north">0 vehicles</div>
+            <div class="sc-clip"  id="sclip-north">—</div>
+          </div>
+          <div class="sc-ind" id="ind-north"></div>
+          <div class="sc-right">
+            <div class="sc-timer"  id="timer-north">--</div>
+            <div class="sc-status" id="status-north">—</div>
+          </div>
+        </div>
+        <div class="sig-card" id="card-south">
+          <div class="sc-left">
+            <div class="sc-dir">⬇ SOUTH</div>
+            <div class="sc-state" id="state-south">—</div>
+            <div class="sc-veh"   id="veh-south">0 vehicles</div>
+            <div class="sc-clip"  id="sclip-south">—</div>
+          </div>
+          <div class="sc-ind" id="ind-south"></div>
+          <div class="sc-right">
+            <div class="sc-timer"  id="timer-south">--</div>
+            <div class="sc-status" id="status-south">—</div>
+          </div>
+        </div>
+        <div class="sig-card" id="card-east">
+          <div class="sc-left">
+            <div class="sc-dir">➡ EAST</div>
+            <div class="sc-state" id="state-east">—</div>
+            <div class="sc-veh"   id="veh-east">0 vehicles</div>
+            <div class="sc-clip"  id="sclip-east">—</div>
+          </div>
+          <div class="sc-ind" id="ind-east"></div>
+          <div class="sc-right">
+            <div class="sc-timer"  id="timer-east">--</div>
+            <div class="sc-status" id="status-east">—</div>
+          </div>
+        </div>
+        <div class="sig-card" id="card-west">
+          <div class="sc-left">
+            <div class="sc-dir">⬅ WEST</div>
+            <div class="sc-state" id="state-west">—</div>
+            <div class="sc-veh"   id="veh-west">0 vehicles</div>
+            <div class="sc-clip"  id="sclip-west">—</div>
+          </div>
+          <div class="sc-ind" id="ind-west"></div>
+          <div class="sc-right">
+            <div class="sc-timer"  id="timer-west">--</div>
+            <div class="sc-status" id="status-west">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Info -->
+      <div class="ai-box">
+        <div class="ai-hdr">🤖 AI Controller <span class="ai-badge" id="aiBadge">ACTIVE</span></div>
+        <div class="ai-row"><span>Mode</span>          <span id="aiMode">AUTO</span></div>
+        <div class="ai-row"><span>Green Lane</span>    <span id="aiGreen">—</span></div>
+        <div class="ai-row"><span>Emergency</span>     <span id="aiEmg">None</span></div>
+        <div class="ai-row"><span>Total Vehicles</span><span id="aiTotal">0</span></div>
+      </div>
+
+      <!-- Event log -->
+      <div class="log-box">
+        <div class="log-hdr">📋 Events <button class="clr-btn" onclick="clearLogs()">Clear</button></div>
+        <div class="log-body" id="logBody"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

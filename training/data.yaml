@@ -1,0 +1,7 @@
+path: D:\projects\Techguru\dataset
+train: images/train
+val: images/val
+
+nc: 1
+names:
+  - emergency_vehicle

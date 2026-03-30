@@ -1,0 +1,114 @@
+# ═══════════════════════════════════════════════════════════════
+#  AI Traffic Management System — .gitignore
+# ═══════════════════════════════════════════════════════════════
+
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual Environments ──────────────────────────────────────
+venv/
+env/
+.env
+.venv
+globalenv/
+ENV/
+
+# ── Videos (too large for GitHub) ────────────────────────────
+# Root-level loose videos
+test1.mp4
+test2.mp4
+test3.mp4
+"videoplayback (1).mp4"
+"videoplayback (4).mp4"
+Fire_Truck_Stuck_in_Traffic_Signal_*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
+# test_videos folder — keep folder structure, ignore actual files
+test_videos/*.mp4
+test_videos/*.avi
+test_videos/*.mov
+test_videos/*.mkv
+!test_videos/.gitkeep
+
+# data_collected — all raw collected videos
+data_collected/
+
+# uploads — runtime user-uploaded files
+uploads/
+backend/uploads/
+
+# ── YOLO Base Models (downloaded automatically, not ours) ─────
+yolov8n.pt
+yolov8s.pt
+yolov8m.pt
+yolov8l.pt
+yolov8x.pt
+yolo26n.pt
+*.pt
+# KEEP our trained emergency detection model
+!models/best.pt
+
+# ── Training Run Artifacts ────────────────────────────────────
+runs/
+wandb/
+
+# ── Dataset Image/Label Files (large, reproducible) ──────────
+dataset/images/
+dataset/labels/
+dataset/labels.cache
+output/
+output1/
+output_clean/
+extracted_frames/
+tooldata/
+
+# Keep dataset config
+!dataset/data.yaml
+!training/data.yaml
+
+# ── Old/Legacy Folders (pre-reorganization) ──────────────────
+static/
+templates/
+trafic_controlroom_frontend/
+
+# ── Runtime State Files ───────────────────────────────────────
+backend/playlists.json
+playlists.json
+
+# ── Node / Electron ───────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+frontend/package-lock.json
+
+# ── Zip Archives ─────────────────────────────────────────────
+*.zip
+
+# ── OS Files ─────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# ── IDE ───────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+*.swp
+*~
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+logs/
