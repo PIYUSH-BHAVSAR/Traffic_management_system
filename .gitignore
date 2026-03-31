@@ -82,8 +82,8 @@ templates/
 trafic_controlroom_frontend/
 
 # ── Runtime State Files ───────────────────────────────────────
-backend/playlists.json
-playlists.json
+# playlists.json is tracked — contains video assignments
+# backend/playlists.json
 
 # ── Node / Electron ───────────────────────────────────────────
 node_modules/

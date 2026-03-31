@@ -1,0 +1,50 @@
+{
+  "north": [
+    {
+      "path": "tools/trim_output/clear road low traffic.mp4",
+      "tag": "normal",
+      "label": "Clear Road Low Traffic"
+    },
+    {
+      "path": "tools/trim_output/high traffic and congestion.mp4",
+      "tag": "high_congestion",
+      "label": "High Traffic and Congestion"
+    }
+  ],
+  "south": [
+    {
+      "path": "tools/trim_output/lowcongestion.mp4",
+      "tag": "normal",
+      "label": "Low Congestion"
+    },
+    {
+      "path": "tools/trim_output/continous traffic high congestion.mp4",
+      "tag": "high_congestion",
+      "label": "Continuous High Congestion"
+    }
+  ],
+  "east": [
+    {
+      "path": "tools/trim_output/910vehicls.mp4",
+      "tag": "normal",
+      "label": "9-10 Vehicles"
+    },
+    {
+      "path": "tools/trim_output/high linear traffic.mp4",
+      "tag": "high_congestion",
+      "label": "High Linear Traffic"
+    }
+  ],
+  "west": [
+    {
+      "path": "tools/trim_output/1415vehicles.mp4",
+      "tag": "high_congestion",
+      "label": "14-15 Vehicles"
+    },
+    {
+      "path": "tools/trim_output/lowcongestion2.mp4",
+      "tag": "normal",
+      "label": "Low Congestion 2"
+    }
+  ]
+}

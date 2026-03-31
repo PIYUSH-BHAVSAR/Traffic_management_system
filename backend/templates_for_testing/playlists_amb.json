@@ -1,0 +1,70 @@
+{
+  "north": [
+    {
+      "path": "D:\\projects\\Techguru\\tools\\trim_output\\clear road low traffic.mp4",
+      "tag": "normal",
+      "label": "Clear Road Low Traffic"
+    },
+    {
+      "path": "D:\\projects\\Techguru\\tools\\trim_output\\high traffic and congestion.mp4",
+      "tag": "high_congestion",
+      "label": "High Traffic and Congestion"
+    },
+    {
+      "path": "D:\\projects\\Techguru\\tools\\trim_output\\1415vehicles.mp4",
+      "tag": "high_congestion",
+      "label": "14-15 Vehicles"
+    }
+  ],
+  "south": [
+    {
+      "path": "D:\\projects\\Techguru\\tools\\trim_output\\ambulance on road in traffic.mp4",
+      "tag": "emergency",
+      "label": "Ambulance on Road"
+    },
+    {
+      "path": "D:\\projects\\Techguru\\tools\\trim_output\\traffic and ambualnce high.mp4",
+      "tag": "emergency",
+      "label": "Traffic and Ambulance High"
+    },
+    {
+      "path": "D:\\projects\\Techguru\\backend\\uploads\\20260330_100222_clear_road_low_traffic.mp4",
+      "tag": "normal",
+      "label": "clear road low traffic.mp4"
+    },
+    {
+      "path": "D:\\projects\\Techguru\\backend\\uploads\\20260330_100857_Fire_Truck_Stuck_in_Traffic_Signal_chennai_fireengine_fireservice_firetruck_720P.mp4",
+      "tag": "normal",
+      "label": "Fire_Truck_Stuck_in_Traffic_Signal_chennai_fireengine_fireservice_firetruck_720P.mp4"
+    }
+  ],
+  "east": [
+    {
+      "path": "D:\\projects\\Techguru\\tools\\trim_output\\910vehicls.mp4",
+      "tag": "normal",
+      "label": "9-10 Vehicles"
+    },
+    {
+      "path": "D:\\projects\\Techguru\\tools\\trim_output\\high linear traffic.mp4",
+      "tag": "high_congestion",
+      "label": "High Linear Traffic"
+    }
+  ],
+  "west": [
+    {
+      "path": "D:\\projects\\Techguru\\tools\\trim_output\\lowcongestion.mp4",
+      "tag": "normal",
+      "label": "Low Congestion"
+    },
+    {
+      "path": "D:\\projects\\Techguru\\tools\\trim_output\\lowcongestion2.mp4",
+      "tag": "normal",
+      "label": "Low Congestion 2"
+    },
+    {
+      "path": "D:\\projects\\Techguru\\tools\\trim_output\\continous traffic high congestion.mp4",
+      "tag": "high_congestion",
+      "label": "Continuous High Congestion"
+    }
+  ]
+}

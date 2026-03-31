@@ -10,9 +10,10 @@ Run from project root:
     python backend/app.py
 """
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, Response
 from flask_cors import CORS
-import threading, time, os, cv2, random, json
+import threading, time, os, cv2, random, json, collections
+import numpy as np
 from ultralytics import YOLO
 from werkzeug.utils import secure_filename
 from datetime import datetime
@@ -42,30 +43,41 @@ CLIP_DURATION     = 20   # seconds each clip plays before advancing
 
 # ── Per-Lane Playlist ─────────────────────────────────────────────────────────
 def default_playlists():
+    T = os.path.join(ROOT, 'tools', 'trim_output')
     return {
         'north': [
-            {'path': os.path.join(TEST_VIDEOS, 'test1.mp4'),          'tag': 'normal',          'label': 'Normal Traffic 1'},
-            {'path': os.path.join(TEST_VIDEOS, 'test2.mp4'),          'tag': 'high_congestion', 'label': 'Heavy Traffic'},
+            {'path': os.path.join(T, 'clear road low traffic.mp4'),           'tag': 'normal',          'label': 'Clear Road Low Traffic'},
+            {'path': os.path.join(T, 'high traffic and congestion.mp4'),       'tag': 'high_congestion', 'label': 'High Traffic and Congestion'},
+            {'path': os.path.join(T, '1415vehicles.mp4'),                      'tag': 'high_congestion', 'label': '14-15 Vehicles'},
         ],
         'south': [
-            {'path': os.path.join(TEST_VIDEOS, 'test3.mp4'),          'tag': 'normal',          'label': 'Normal Traffic 1'},
-            {'path': os.path.join(TEST_VIDEOS, 'videoplayback (1).mp4'), 'tag': 'normal',       'label': 'Normal Traffic 2'},
+            {'path': os.path.join(T, 'ambulance on road in traffic.mp4'),      'tag': 'emergency',       'label': 'Ambulance on Road'},
+            {'path': os.path.join(T, 'traffic and ambualnce high.mp4'),        'tag': 'emergency',       'label': 'Traffic and Ambulance High'},
         ],
         'east': [
-            {'path': os.path.join(TEST_VIDEOS, 'videoplayback (4).mp4'), 'tag': 'normal',       'label': 'Normal Traffic 1'},
-            {'path': os.path.join(TEST_VIDEOS, 'test2.mp4'),          'tag': 'high_congestion', 'label': 'Heavy Traffic'},
+            {'path': os.path.join(T, '910vehicls.mp4'),                        'tag': 'normal',          'label': '9-10 Vehicles'},
+            {'path': os.path.join(T, 'high linear traffic.mp4'),               'tag': 'high_congestion', 'label': 'High Linear Traffic'},
         ],
         'west': [
-            {'path': os.path.join(TEST_VIDEOS, 'videoplayback (1).mp4'), 'tag': 'normal',       'label': 'Normal Traffic 1'},
-            {'path': os.path.join(TEST_VIDEOS, 'emergency_demo.mp4'), 'tag': 'emergency',        'label': 'Emergency Vehicle'},
+            {'path': os.path.join(T, 'lowcongestion.mp4'),                     'tag': 'normal',          'label': 'Low Congestion'},
+            {'path': os.path.join(T, 'lowcongestion2.mp4'),                    'tag': 'normal',          'label': 'Low Congestion 2'},
+            {'path': os.path.join(T, 'continous traffic high congestion.mp4'), 'tag': 'high_congestion', 'label': 'Continuous High Congestion'},
         ],
     }
+
 
 def load_playlists():
     if os.path.exists(PLAYLIST_FILE):
         try:
             with open(PLAYLIST_FILE) as f:
-                return json.load(f)
+                pl = json.load(f)
+            # Resolve relative paths against project ROOT
+            for direction, clips in pl.items():
+                for clip in clips:
+                    p = clip.get('path', '')
+                    if p and not os.path.isabs(p):
+                        clip['path'] = os.path.join(ROOT, p)
+            return pl
         except Exception:
             pass
     pl = default_playlists()
@@ -88,10 +100,11 @@ shared_state = {
         'emergency':     False,
         'confidence':    0.0,
         'active':        False,
-        'current_clip':  0,          # index in playlist
-        'clip_tag':      'normal',   # tag of current clip
+        'has_video':     False,
+        'current_clip':  0,
+        'clip_tag':      'normal',
         'clip_label':    '',
-        'clip_elapsed':  0,          # seconds into current clip
+        'clip_elapsed':  0,
     }
     for d in DIRECTIONS
 }
@@ -103,6 +116,62 @@ signal_state = {
     'cooldown_until': 0,
     'mode':           'auto',
 }
+
+# ── Frame Buffers (latest annotated frame per lane for MJPEG stream) ──────────
+frame_buffers = {d: None for d in DIRECTIONS}
+frame_lock    = threading.Lock()
+
+# ── Decision Log (last 100 decisions for /api/decisions) ─────────────────────
+decision_log  = collections.deque(maxlen=100)
+decision_lock = threading.Lock()
+
+def log_decision(msg, level='info'):
+    ts = datetime.now().strftime('%H:%M:%S')
+    with decision_lock:
+        decision_log.append({'time': ts, 'msg': msg, 'level': level})
+    print(f'[Decision] {msg}')
+
+# ── Drawing helpers ───────────────────────────────────────────────────────────
+SIG_COLORS_BGR = {'green': (0, 255, 100), 'yellow': (0, 215, 255), 'red': (60, 60, 255)}
+DENSITY_COLORS = {'LOW': (0, 255, 100), 'MEDIUM': (0, 215, 255), 'HIGH': (60, 60, 255)}
+
+def draw_overlay(frame, direction, state, sig_color):
+    """Draw YOLO detections are already on frame; add HUD overlay."""
+    h, w = frame.shape[:2]
+
+    # Semi-transparent top bar
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (0, 0), (w, 36), (10, 14, 26), -1)
+    cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
+
+    # Direction label
+    cv2.putText(frame, direction.upper(), (8, 24),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (200, 220, 255), 2, cv2.LINE_AA)
+
+    # Vehicle count
+    vc    = state['vehicle_count']
+    dens  = state['density']
+    d_col = DENSITY_COLORS.get(dens, (200, 200, 200))
+    cv2.putText(frame, f'{vc} vehicles  {dens}', (w // 2 - 70, 24),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, d_col, 1, cv2.LINE_AA)
+
+    # Signal indicator (top-right circle)
+    s_col = SIG_COLORS_BGR.get(sig_color, (60, 60, 255))
+    cv2.circle(frame, (w - 20, 18), 12, s_col, -1)
+    cv2.circle(frame, (w - 20, 18), 12, (255, 255, 255), 1)
+    sig_txt = sig_color.upper()[0]  # G / Y / R
+    cv2.putText(frame, sig_txt, (w - 26, 24),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2, cv2.LINE_AA)
+
+    # Emergency banner
+    if state['emergency']:
+        conf = state['confidence']
+        cv2.rectangle(frame, (0, h - 34), (w, h), (0, 0, 180), -1)
+        cv2.putText(frame, f'EMERGENCY DETECTED  conf:{conf:.0%}',
+                    (8, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                    (255, 255, 255), 2, cv2.LINE_AA)
+
+    return frame
 
 # ── AI Models ─────────────────────────────────────────────────────────────────
 _traffic_model   = None
@@ -145,7 +214,8 @@ VEHICLE_CLASSES = {0, 2, 3, 5, 7}
 lane_threads = {}
 
 def process_lane(direction):
-    """Cycles through the lane's playlist. Each clip plays for CLIP_DURATION seconds."""
+    """Cycles through the lane's playlist. Each clip plays for CLIP_DURATION seconds.
+    Annotates frames with YOLO detections and pushes to frame_buffers for MJPEG stream."""
     traffic_model   = get_traffic_model()
     emergency_model = get_emergency_model()
     buffer = []
@@ -153,25 +223,29 @@ def process_lane(direction):
 
     while True:
         with state_lock:
-            pl = playlists.get(direction, [])
+            pl  = playlists.get(direction, [])
             idx = shared_state[direction]['current_clip']
 
         if not pl:
+            # Push a blank "no video" frame
+            blank = _make_blank_frame(direction)
+            with frame_lock:
+                frame_buffers[direction] = blank
             time.sleep(1)
             continue
 
-        idx = idx % len(pl)
+        idx  = idx % len(pl)
         clip = pl[idx]
-        path = clip.get('path', '')
-        tag  = clip.get('tag', 'normal')
+        path  = clip.get('path', '')
+        tag   = clip.get('tag', 'normal')
         label = clip.get('label', '')
 
-        # Update state for this clip
         with state_lock:
             shared_state[direction]['current_clip'] = idx
             shared_state[direction]['clip_tag']     = tag
             shared_state[direction]['clip_label']   = label
             shared_state[direction]['clip_elapsed'] = 0
+            shared_state[direction]['has_video']    = True
 
         print(f'[{direction}] Clip {idx}: {label} ({tag}) — {path}')
 
@@ -196,19 +270,16 @@ def process_lane(direction):
         while True:
             elapsed = time.time() - clip_start
 
-            # Check if playlist changed (new clip added/removed)
             with state_lock:
                 new_pl  = playlists.get(direction, [])
                 new_idx = shared_state[direction]['current_clip']
                 shared_state[direction]['clip_elapsed'] = int(elapsed)
 
-            # Advance to next clip after CLIP_DURATION
             if elapsed >= CLIP_DURATION:
                 with state_lock:
                     shared_state[direction]['current_clip'] = (idx + 1) % max(len(new_pl), 1)
                 break
 
-            # If clip index was changed externally (user skipped)
             if new_idx != idx:
                 break
 
@@ -221,49 +292,49 @@ def process_lane(direction):
 
             frame = cv2.resize(frame, (640, 480))
 
-            # Vehicle detection
+            # ── Step 1: YOLOv8s — vehicle detection + congestion ──────────
             vehicle_count = 0
             if traffic_model:
                 try:
                     results = traffic_model(frame, conf=0.25, iou=0.4, verbose=False)[0]
                     for box in results.boxes:
-                        if int(box.cls[0]) in VEHICLE_CLASSES:
+                        cls = int(box.cls[0])
+                        if cls in VEHICLE_CLASSES:
                             vehicle_count += 1
-                except Exception:
-                    vehicle_count = _tag_count(tag)
-            else:
-                vehicle_count = _tag_count(tag)
+                            x1, y1, x2, y2 = map(int, box.xyxy[0])
+                            conf_v = float(box.conf[0])
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 100), 2)
+                            cv2.putText(frame, f'{conf_v:.0%}', (x1, max(0, y1 - 4)),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 100), 1, cv2.LINE_AA)
+                except Exception as e:
+                    print(f'[{direction}] traffic model error: {e}')
 
             buffer.append(vehicle_count)
             if len(buffer) > BUFFER:
                 buffer.pop(0)
             smooth = int(sum(buffer) / len(buffer))
 
-            # For high_congestion tag, boost count
-            if tag == 'high_congestion':
-                smooth = max(smooth, random.randint(16, 26))
-
-            density = ('LOW' if smooth < LOW_THRESHOLD else
+            density = ('LOW'    if smooth < LOW_THRESHOLD    else
                        'MEDIUM' if smooth < MEDIUM_THRESHOLD else 'HIGH')
 
-            # Emergency detection
-            emergency   = False
-            confidence  = 0.0
-            if tag == 'emergency':
-                if emergency_model:
-                    try:
-                        em = emergency_model(frame, conf=0.45, verbose=False)[0]
-                        for box in em.boxes:
-                            c = float(box.conf[0])
-                            if c > 0.45:
-                                emergency  = True
-                                confidence = max(confidence, c)
-                    except Exception:
-                        pass
-                # Force emergency flag after a few seconds into the clip
-                if elapsed > 3:
-                    emergency  = True
-                    confidence = max(confidence, 0.82)
+            # ── Step 2: best.pt — ambulance / emergency detection ─────────
+            # Runs on EVERY frame regardless of tag
+            emergency  = False
+            confidence = 0.0
+            if emergency_model:
+                try:
+                    em_results = emergency_model(frame, conf=0.40, verbose=False)[0]
+                    for box in em_results.boxes:
+                        c = float(box.conf[0])
+                        if c > 0.40:
+                            emergency  = True
+                            confidence = max(confidence, c)
+                            x1, y1, x2, y2 = map(int, box.xyxy[0])
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+                            cv2.putText(frame, f'AMBULANCE {c:.0%}', (x1, max(0, y1 - 6)),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2, cv2.LINE_AA)
+                except Exception as e:
+                    print(f'[{direction}] emergency model error: {e}')
 
             with state_lock:
                 shared_state[direction]['vehicle_count'] = smooth
@@ -271,8 +342,16 @@ def process_lane(direction):
                 shared_state[direction]['emergency']     = emergency
                 shared_state[direction]['confidence']    = round(confidence, 2)
                 shared_state[direction]['active']        = True
+                cur_sig = signal_state['signals'].get(direction, 'red')
 
-            time.sleep(0.08)
+            # ── Draw HUD then push to frame buffer ────────────────────────
+            annotated = draw_overlay(frame.copy(), direction,
+                                     shared_state[direction], cur_sig)
+            _, jpg = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            with frame_lock:
+                frame_buffers[direction] = jpg.tobytes()
+
+            time.sleep(0.04)   # ~25 fps
 
         cap.release()
 
@@ -281,21 +360,44 @@ def _tag_count(tag):
     if tag == 'high_congestion': return random.randint(18, 28)
     return random.randint(2, 12)
 
+def _make_blank_frame(direction):
+    """JPEG bytes of a dark placeholder frame."""
+    import numpy as np
+    img = np.zeros((480, 640, 3), dtype='uint8')
+    img[:] = (10, 14, 26)
+    cv2.putText(img, direction.upper(), (240, 220),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (50, 80, 120), 2, cv2.LINE_AA)
+    cv2.putText(img, 'No video — add a clip', (160, 260),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (40, 60, 90), 1, cv2.LINE_AA)
+    _, jpg = cv2.imencode('.jpg', img)
+    return jpg.tobytes()
+
 def _simulate_clip(direction, tag, duration):
-    """Simulate data for a clip when video file is missing."""
+    """Push placeholder frames when video file is missing."""
+    import numpy as np
     start = time.time()
     while time.time() - start < duration:
-        count = _tag_count(tag)
+        count   = _tag_count(tag)
         density = ('LOW' if count < LOW_THRESHOLD else
                    'MEDIUM' if count < MEDIUM_THRESHOLD else 'HIGH')
-        emergency  = tag == 'emergency' and (time.time() - start) > 3
-        confidence = 0.85 if emergency else 0.0
         with state_lock:
             shared_state[direction]['vehicle_count'] = count
             shared_state[direction]['density']       = density
-            shared_state[direction]['emergency']     = emergency
-            shared_state[direction]['confidence']    = confidence
+            shared_state[direction]['emergency']     = False
+            shared_state[direction]['confidence']    = 0.0
             shared_state[direction]['active']        = True
+            cur_sig = signal_state['signals'].get(direction, 'red')
+
+        img = np.zeros((480, 640, 3), dtype='uint8')
+        img[:] = (10, 14, 26)
+        cv2.putText(img, 'FILE NOT FOUND', (180, 230),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (60, 60, 180), 2, cv2.LINE_AA)
+        sim_state = {'vehicle_count': count, 'density': density,
+                     'emergency': False, 'confidence': 0.0}
+        annotated = draw_overlay(img, direction, sim_state, cur_sig)
+        _, jpg = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        with frame_lock:
+            frame_buffers[direction] = jpg.tobytes()
         time.sleep(0.5)
 
 def start_lane(direction):
@@ -341,22 +443,21 @@ def traffic_controller():
                 signal_state['mode']           = 'emergency'
                 signal_state['cooldown_until'] = now + COOLDOWN_TIME
                 print(f'[Controller] EMERGENCY → {emergency_lane.upper()} GREEN')
+                log_decision(f'🚨 EMERGENCY → {emergency_lane.upper()} GREEN (conf:{shared_state[emergency_lane]["confidence"]:.0%})', 'emergency')
 
             elif signal_state['mode'] == 'emergency' and not cooldown_active:
                 signal_state['mode']           = 'auto'
                 signal_state['emergency_lane'] = None
                 phase_end = now
+                log_decision('✓ Emergency cleared — resuming AUTO mode', 'info')
 
             elif signal_state['mode'] == 'auto':
                 if now >= phase_end:
-                    # Pick lane with highest vehicle count (smart scheduling)
                     counts = {d: shared_state[d]['vehicle_count'] for d in DIRECTIONS}
-                    # Weighted: current phase order + congestion priority
                     phase_index = (phase_index + 1) % len(phase_order)
                     green_lane  = phase_order[phase_index]
 
-                    # Override with highest congestion lane if significantly higher
-                    max_lane  = max(counts, key=counts.get)
+                    max_lane = max(counts, key=counts.get)
                     if counts[max_lane] > counts[green_lane] + 8:
                         green_lane = max_lane
 
@@ -369,6 +470,7 @@ def traffic_controller():
                     signal_state['signals']    = signals
                     signal_state['green_lane'] = green_lane
                     print(f'[Controller] → {green_lane.upper()} GREEN ({green_time}s, {count} vehicles)')
+                    log_decision(f'🟢 {green_lane.upper()} GREEN — {count} vehicles, {green_time}s green time', 'green')
 
         time.sleep(1)
 
@@ -391,6 +493,7 @@ def api_cameras():
                 'emergency':    s['emergency'],
                 'confidence':   s['confidence'],
                 'active':       s['active'],
+                'hasVideo':     s['has_video'],
                 'currentClip':  s['current_clip'],
                 'clipTag':      s['clip_tag'],
                 'clipLabel':    s['clip_label'],
@@ -533,6 +636,58 @@ def api_status():
 @app.route('/uploads/<path:filename>')
 def serve_upload(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
+
+# ── MJPEG Stream ──────────────────────────────────────────────────────────────
+def _mjpeg_generator(direction):
+    while True:
+        with frame_lock:
+            jpg = frame_buffers.get(direction)
+        if jpg is None:
+            jpg = _make_blank_frame(direction)
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + jpg + b'\r\n')
+        time.sleep(0.04)   # ~25 fps cap
+
+@app.route('/video/<direction>')
+def video_stream(direction):
+    if direction not in DIRECTIONS:
+        return 'Invalid direction', 400
+    return Response(
+        _mjpeg_generator(direction),
+        mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
+
+# ── Upload alias for new frontend (/api/upload/<direction>) ───────────────────
+@app.route('/api/upload/<direction>', methods=['POST'])
+def api_upload_alias(direction):
+    """Alias used by frontend_new — uploads video and adds it to the playlist."""
+    if direction not in DIRECTIONS:
+        return jsonify({'error': 'Invalid lane'}), 400
+
+    if 'video' not in request.files:
+        return jsonify({'error': 'No video file'}), 400
+
+    f         = request.files['video']
+    tag       = request.form.get('tag', 'normal')
+    label     = request.form.get('label', f.filename)
+    filename  = secure_filename(f.filename)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    save_path = os.path.join(UPLOAD_FOLDER, f'{timestamp}_{filename}')
+    f.save(save_path)
+
+    clip = {'path': save_path, 'tag': tag, 'label': label}
+    with state_lock:
+        playlists[direction].append(clip)
+        save_playlists(playlists)
+
+    log_decision(f'📥 [{direction.upper()}] New clip uploaded: "{label}" ({tag})', 'info')
+    return jsonify({'success': True, 'clip': clip})
+
+# ── Decisions log ─────────────────────────────────────────────────────────────
+@app.route('/api/decisions')
+def api_decisions():
+    with decision_lock:
+        return jsonify(list(decision_log))
 
 # ── Start ─────────────────────────────────────────────────────────────────────
 def start_background():

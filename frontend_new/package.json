@@ -1,0 +1,12 @@
+{
+  "name": "smart-traffic-desktop",
+  "version": "1.0.0",
+  "description": "Smart Traffic Monitoring System — Electron Dashboard",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^28.0.0"
+  }
+}
